@@ -3200,6 +3200,8 @@ fn build() -> Vec<CommandSpec> {
                         };
                         (keyframes, v)
                     };
+                    let accepted_value = param_value_to_json(&v);
+
                     if e.effect == "ultra_key"
                         && pid == "setting"
                         && let ParamValue::Choice(setting) = v
@@ -3214,7 +3216,7 @@ fn build() -> Vec<CommandSpec> {
                             }
                         }
                     }
-                    Ok((keyframes, val))
+                    Ok((keyframes, accepted_value))
                 })?;
                 // 0 keyframes: the value is static (`time` was not used)
                 Ok(json!({"keyframes": keyframes, "param": pid, "value": value}))
@@ -3761,13 +3763,27 @@ pub(crate) fn json_to_param(template: &ParamValue, v: &Value) -> Option<ParamVal
             _ => return None,
         },
         ParamValue::Bool(_) => ParamValue::Bool(v.as_bool()?),
-        ParamValue::Choice(_) => ParamValue::Choice(v.as_u64()? as u32),
+        ParamValue::Choice(_) => ParamValue::Choice(u32::try_from(v.as_u64()?).ok()?),
         ParamValue::Text(_) => ParamValue::Text(v.as_str()?.to_string()),
         ParamValue::Path(_) => ParamValue::Path(crate::masks::path_from_json(v)?),
         ParamValue::Curve(_) => {
             ParamValue::Curve(v.as_array()?.iter().filter_map(|p| Some([p.get(0)?.as_f64()? as f32, p.get(1)?.as_f64()? as f32])).collect())
         }
     })
+}
+
+/// Encode the accepted parameter value in the JSON shape returned to command callers.
+fn param_value_to_json(value: &ParamValue) -> Value {
+    match value {
+        ParamValue::Float(value) => json!(value),
+        ParamValue::Vec2(value) => json!([value.x, value.y]),
+        ParamValue::Color(value) => json!(value),
+        ParamValue::Bool(value) => json!(value),
+        ParamValue::Choice(value) => json!(value),
+        ParamValue::Text(value) => json!(value),
+        ParamValue::Curve(value) => json!(value),
+        ParamValue::Path(value) => crate::masks::path_to_json(value),
+    }
 }
 
 fn copy_selection(s: &mut Session) {

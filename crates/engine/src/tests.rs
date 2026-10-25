@@ -381,6 +381,20 @@ fn set_param_writes_a_keyframe_when_asked_or_animated() {
     assert_eq!(s.execute("effects.setParam", odd).unwrap()["keyframes"], 2);
 }
 
+/// The response reflects the stored point when extra input coordinates are ignored.
+#[test]
+fn set_param_reports_the_stored_vector_value() {
+    let mut s = demo();
+    let c = s.active_sequence().unwrap().video_tracks[0].items[0].id.0;
+    let result = s.execute("effects.setParam", json!({"clip": c, "effect": "motion", "param": "position", "value": [11.0, 22.0, 33.0]})).unwrap();
+    assert_eq!(result, json!({"keyframes": 0, "param": "position", "value": [11.0, 22.0]}));
+
+    let sequence = s.execute("sequence.inspect", json!({})).unwrap();
+    let effects = sequence["video"][0]["items"][0]["effects"].as_array().unwrap();
+    let motion = effects.iter().find(|e| e["effect"] == "motion").unwrap();
+    assert_eq!(motion["params"]["position"]["value"], "Vec2(Vec2 { x: 11.0, y: 22.0 })");
+}
+
 /// A static edit succeeds without creating keyframes; its response identifies the accepted value.
 #[test]
 fn set_param_reports_static_value_and_parameter() {
@@ -475,7 +489,7 @@ fn set_param_takes_a_choice_by_name() {
     // a name that is not an option is an error that lists the options and changes nothing
     let e = s.execute("effects.setParam", set(json!("Glow"))).unwrap_err().to_string();
     assert!(e.contains("Screen") && e.contains("Overlay"), "{e}");
-    for bad in [json!(""), json!(null), json!([8]), json!({"name": "Screen"}), json!(-1), json!(1.5)] {
+    for bad in [json!(""), json!(null), json!([8]), json!({"name": "Screen"}), json!(-1), json!(1.5), json!(u64::from(u32::MAX) + 1)] {
         assert!(s.execute("effects.setParam", set(bad.clone())).is_err(), "{bad}");
     }
     assert_eq!(blend(&s), ParamValue::Choice(12));
