@@ -3146,7 +3146,7 @@ fn build() -> Vec<CommandSpec> {
                 if bool_p(p, "begin").unwrap_or(false) {
                     s.history.merge_key = None;
                 }
-                let keyframes = s.edit_sequence_as("Change Effect Parameter", merge.as_deref(), |q, _, _| {
+                let (keyframes, value) = s.edit_sequence_as("Change Effect Parameter", merge.as_deref(), |q, _, _| {
                     let (_, it) = q.find_item_mut(c).ok_or(filmcraft_edit::EditError::NoItem(c))?;
                     let mt = it.source_time_at(at.unwrap_or_else(|| ph.clamp(it.start, (it.end() - Tick(1)).max(it.start))));
                     let e = match &eff {
@@ -3214,10 +3214,10 @@ fn build() -> Vec<CommandSpec> {
                             }
                         }
                     }
-                    Ok(keyframes)
+                    Ok((keyframes, val))
                 })?;
                 // 0 keyframes: the value is static (`time` was not used)
-                Ok(json!({"keyframes": keyframes}))
+                Ok(json!({"keyframes": keyframes, "param": pid, "value": value}))
             }
         ),
         cmd!("effects.toggleAnimation", "Toggle Animation", [], None, r#"{"clip":id,"effect":str|index,"param":str,"mask":n?}"#, has_seq, |s, p| {

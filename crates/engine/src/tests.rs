@@ -349,11 +349,11 @@ fn set_param_writes_a_keyframe_when_asked_or_animated() {
     let mut first = set(60.0, 0.5);
     first["keyframe"] = json!(true);
     let r = s.execute("effects.setParam", first).unwrap();
-    assert_eq!(r["keyframes"], 1, "{r}");
+    assert_eq!(r, json!({"keyframes": 1, "param": "scale", "value": 60.0}));
     assert_eq!(scale(&s).0, 1);
     // animated now, so a plain set at another time is a second keyframe
     let r = s.execute("effects.setParam", set(120.0, 2.5)).unwrap();
-    assert_eq!(r["keyframes"], 2, "{r}");
+    assert_eq!(r, json!({"keyframes": 2, "param": "scale", "value": 120.0}));
     let (n, _, a, b) = scale(&s);
     assert_eq!((n, a, b), (2, 60.0, 120.0));
     // a keyframe that is already there is replaced, not doubled
@@ -379,6 +379,24 @@ fn set_param_writes_a_keyframe_when_asked_or_animated() {
     let mut odd = set(70.0, 0.5);
     odd["keyframe"] = json!("yes");
     assert_eq!(s.execute("effects.setParam", odd).unwrap()["keyframes"], 2);
+}
+
+/// A static edit succeeds without creating keyframes; its response identifies the accepted value.
+#[test]
+fn set_param_reports_static_value_and_parameter() {
+    let mut s = demo();
+    let c = s.active_sequence().unwrap().video_tracks[0].items[0].id.0;
+    for (effect, param, value, stored, inspected) in
+        [("opacity", "blend", json!("Screen"), json!(8), "Choice(8)"), ("motion", "scale", json!(80.0), json!(80.0), "Float(80.0)")]
+    {
+        let result = s.execute("effects.setParam", json!({"clip": c, "effect": effect, "param": param, "value": value})).unwrap();
+        assert_eq!(result, json!({"keyframes": 0, "param": param, "value": stored}));
+        let sequence = s.execute("sequence.inspect", json!({})).unwrap();
+        let effects = sequence["video"][0]["items"][0]["effects"].as_array().unwrap();
+        let effect = effects.iter().find(|e| e["effect"] == effect).unwrap();
+        assert_eq!(effect["params"][param]["value"], inspected);
+        assert_eq!(effect["params"][param]["keyframes"], 0);
+    }
 }
 
 /// A keyframe set with a `time` outside the clip stays at that time (#1055), before the start as
