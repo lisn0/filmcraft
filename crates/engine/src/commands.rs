@@ -1177,6 +1177,7 @@ fn marker_list_mut(s: &mut Session) -> Result<(ItemId, Tick)> {
     Ok((seq, s.playhead()))
 }
 
+/// Builds the command registry shared by the UI, CLI and control interfaces.
 fn build() -> Vec<CommandSpec> {
     let mut v = vec![
         // ================= File =================
@@ -3745,6 +3746,7 @@ fn set_work_area_point(s: &mut Session, p: &Value, is_in: bool) -> Result<Value>
     Ok(json!({"start": start.0, "end": end.0}))
 }
 
+/// Decodes caller JSON using the stored parameter as a type template.
 pub(crate) fn json_to_param(template: &ParamValue, v: &Value) -> Option<ParamValue> {
     Some(match template {
         ParamValue::Float(_) => ParamValue::Float(v.as_f64()?),
