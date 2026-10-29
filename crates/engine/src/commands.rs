@@ -309,6 +309,23 @@ pub(crate) fn clips_p(s: &Session, p: &Value) -> Vec<ClipId> {
         None => clip_p(p, "clip").map(|c| vec![c]).unwrap_or_else(|| s.state.selection.clone()),
     }
 }
+
+pub(crate) fn target_clips_p(p: &Value, cmd: &str) -> Result<Option<Vec<ClipId>>> {
+    if let Some(c) = p.get("clip") {
+        let id = c.as_u64().ok_or_else(|| bad(cmd, "`clip` must be an integer clip id"))?;
+        return Ok(Some(vec![ClipId(id)]));
+    }
+    if let Some(clips) = p.get("clips") {
+        let arr = clips.as_array().ok_or_else(|| bad(cmd, "`clips` must be an array of clip ids"))?;
+        let mut ids = Vec::with_capacity(arr.len());
+        for v in arr {
+            let id = v.as_u64().ok_or_else(|| bad(cmd, "`clips` elements must be integer clip ids"))?;
+            ids.push(ClipId(id));
+        }
+        return Ok(Some(ids));
+    }
+    Ok(None)
+}
 /// The track parameter `k` names: a track id, or "V1" / "A2" (kind and 1-based number).
 /// `Ok(None)` when the parameter is absent. Naming a track the active sequence does not have is
 /// an error (bad parameters of `cmd`): callers fall back to a default track only when no track
@@ -1741,23 +1758,6 @@ fn build() -> Vec<CommandSpec> {
         }),
         cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{}", has_clipboard, |s, _| paste(s, false)),
         cmd!("edit.pasteInsert", "Paste Insert", ["Edit"], Some("Cmd+Shift+V"), "{}", has_clipboard, |s, _| paste(s, true)),
-fn target_clips_p(p: &Value, cmd: &str) -> Result<Option<Vec<ClipId>>> {
-    if let Some(c) = p.get("clip") {
-        let id = c.as_u64().ok_or_else(|| bad(cmd, "`clip` must be an integer clip id"))?;
-        return Ok(Some(vec![ClipId(id)]));
-    }
-    if let Some(clips) = p.get("clips") {
-        let arr = clips.as_array().ok_or_else(|| bad(cmd, "`clips` must be an array of clip ids"))?;
-        let mut ids = Vec::with_capacity(arr.len());
-        for v in arr {
-            let id = v.as_u64().ok_or_else(|| bad(cmd, "`clips` elements must be integer clip ids"))?;
-            ids.push(ClipId(id));
-        }
-        return Ok(Some(ids));
-    }
-    Ok(None)
-}
-
         cmd!(
             "edit.clear",
             "Clear",
