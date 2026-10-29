@@ -310,21 +310,29 @@ pub(crate) fn clips_p(s: &Session, p: &Value) -> Vec<ClipId> {
     }
 }
 
-pub(crate) fn target_clips_p(p: &Value, cmd: &str) -> Result<Option<Vec<ClipId>>> {
-    if let Some(c) = p.get("clip") {
-        let id = c.as_u64().ok_or_else(|| bad(cmd, "`clip` must be an integer clip id"))?;
-        return Ok(Some(vec![ClipId(id)]));
-    }
-    if let Some(clips) = p.get("clips") {
-        let arr = clips.as_array().ok_or_else(|| bad(cmd, "`clips` must be an array of clip ids"))?;
-        let mut ids = Vec::with_capacity(arr.len());
-        for v in arr {
-            let id = v.as_u64().ok_or_else(|| bad(cmd, "`clips` elements must be integer clip ids"))?;
-            ids.push(ClipId(id));
+/// The clips a destructive command was explicitly told to act on, strictly validated.
+/// `Ok(None)` only when NEITHER `clip` nor `clips` is present (the caller then falls back to the
+/// selection). A key that is present must be valid: `null`, a wrong type, an empty list,
+/// non-integer elements, ids of no clip in the active sequence, or both keys together are errors
+/// (bad parameters of `cmd`), so a malformed target never silently deletes the selection.
+pub(crate) fn target_clips_p(s: &Session, p: &Value, cmd: &str) -> Result<Option<Vec<ClipId>>> {
+    let ids: Vec<u64> = match (p.get("clip"), p.get("clips")) {
+        (None, None) => return Ok(None),
+        (Some(_), Some(_)) => return Err(bad(cmd, "give either `clip` or `clips`, not both")),
+        (Some(c), None) => vec![c.as_u64().ok_or_else(|| bad(cmd, "`clip` must be an integer clip id"))?],
+        (None, Some(clips)) => {
+            let arr = clips.as_array().ok_or_else(|| bad(cmd, "`clips` must be an array of clip ids"))?;
+            if arr.is_empty() {
+                return Err(bad(cmd, "`clips` must name at least one clip id"));
+            }
+            arr.iter().map(|v| v.as_u64().ok_or_else(|| bad(cmd, "`clips` elements must be integer clip ids"))).collect::<Result<_>>()?
         }
-        return Ok(Some(ids));
+    };
+    let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    if let Some(missing) = ids.iter().find(|id| seq.find_item(ClipId(**id)).is_none()) {
+        return Err(bad(cmd, format!("no clip {missing} in the active sequence (clip ids are the `clip` numbers of the items in sequence.inspect)")));
     }
-    Ok(None)
+    Ok(Some(ids.into_iter().map(ClipId).collect()))
 }
 /// The track parameter `k` names: a track id, or "V1" / "A2" (kind and 1-based number).
 /// `Ok(None)` when the parameter is absent. Naming a track the active sequence does not have is
@@ -1766,7 +1774,7 @@ fn build() -> Vec<CommandSpec> {
             r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#,
             has_any_selection,
             |s, p| {
-                let target = target_clips_p(p, "edit.clear")?;
+                let target = target_clips_p(s, p, "edit.clear")?;
                 if target.is_none() && s.state.selection.is_empty() {
                     // a selected transition (clicked in the Timeline) goes, as a clip would
                     if !s.state.transition_selection.is_empty() {
@@ -1803,7 +1811,7 @@ fn build() -> Vec<CommandSpec> {
             r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#,
             has_clip_or_caption_selection,
             |s, p| {
-                let target = target_clips_p(p, "edit.rippleDelete")?;
+                let target = target_clips_p(s, p, "edit.rippleDelete")?;
                 if target.is_none() && s.state.selection.is_empty() {
                     if s.state.caption_selection.is_empty()
                         && let Some(g) = s.state.gap_selection
@@ -2811,9 +2819,21 @@ fn build() -> Vec<CommandSpec> {
                 None => place_one(s, p),
             }
         ),
-        cmd!("timeline.delete", "Delete Clips", [], None, r#"{"clips":[id]|"clip":id?,"ripple":bool?}"#, has_seq, |s, p| {
-            if bool_p(p, "ripple").unwrap_or(false) { s.execute("edit.rippleDelete", p.clone()) } else { s.execute("edit.clear", p.clone()) }
-        }),
+        cmd!(
+            "timeline.delete",
+            "Delete Clips",
+            [],
+            None,
+            r#"{"clips":[id]?,"clip":id?,"ripple":bool?} (deletes the named clips, else the selection; ripple closes the gap)"#,
+            has_seq,
+            |s, p| {
+                let ripple = match p.get("ripple") {
+                    None | Some(Value::Null) => false,
+                    Some(v) => v.as_bool().ok_or_else(|| bad("timeline.delete", "`ripple` must be a boolean"))?,
+                };
+                s.execute(if ripple { "edit.rippleDelete" } else { "edit.clear" }, p.clone())
+            }
+        ),
         cmd!("timeline.select", "Select Clips", [], None, r#"{"clips":[id],"transitions":[id]?,"add":bool,"toggle":bool,"linked":bool?}"#, has_seq, |s, p| {
             if let Some(ids) = p.get("transitions") {
                 return select_transitions(s, ids, bool_p(p, "add").unwrap_or(false), bool_p(p, "toggle").unwrap_or(false));
