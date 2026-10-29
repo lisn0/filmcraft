@@ -425,12 +425,22 @@ fn deletion_commands_reject_invalid_explicit_targets_without_touching_the_select
     assert_eq!(v1(&s).len(), before);
 }
 
+/// Only V1 stays sync-locked, so a ripple of a lone V1 clip (linked selection is off) moves nothing else.
+fn unlock_all_but_v1(s: &mut Session) {
+    let seq = s.active_sequence().unwrap();
+    let (nv, na) = (seq.video_tracks.len(), seq.audio_tracks.len());
+    let names = (2..=nv).map(|n| format!("V{n}")).chain((1..=na).map(|n| format!("A{n}")));
+    for track in names.collect::<Vec<_>>() {
+        s.execute("timeline.setTrack", json!({"track": track, "syncLock": false})).unwrap();
+    }
+}
+
 /// With neither `clip` nor `clips`, deletion still acts on the selection.
 #[test]
 fn deletion_commands_fall_back_to_the_selection_only_when_no_target_is_named() {
     for cmd in ["edit.clear", "edit.rippleDelete", "timeline.delete"] {
         let mut s = demo();
-        s.execute("timeline.setTrack", json!({"track": "A2", "syncLock": false})).unwrap();
+        unlock_all_but_v1(&mut s);
         let b = v1(&s)[1].clone();
         s.state.selection = vec![b.id];
         s.execute(cmd, json!({})).unwrap();
@@ -438,7 +448,7 @@ fn deletion_commands_fall_back_to_the_selection_only_when_no_target_is_named() {
         assert!(s.state.selection.is_empty(), "{cmd} clears the selection");
     }
     let mut s = demo();
-    s.execute("timeline.setTrack", json!({"track": "A2", "syncLock": false})).unwrap();
+    unlock_all_but_v1(&mut s);
     let b = v1(&s)[1].clone();
     s.state.selection = vec![b.id];
     s.execute("timeline.delete", json!({"ripple": true})).unwrap();
