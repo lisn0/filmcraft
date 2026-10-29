@@ -1741,54 +1741,95 @@ fn build() -> Vec<CommandSpec> {
         }),
         cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{}", has_clipboard, |s, _| paste(s, false)),
         cmd!("edit.pasteInsert", "Paste Insert", ["Edit"], Some("Cmd+Shift+V"), "{}", has_clipboard, |s, _| paste(s, true)),
-        cmd!("edit.clear", "Clear", ["Edit"], Some("Backspace"), r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#, has_any_selection, |s, p| {
-            if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
-                // a selected transition (clicked in the Timeline) goes, as a clip would
-                if !s.state.transition_selection.is_empty() {
-                    let ids = s.state.transition_selection.clone();
-                    return remove_transitions(s, &ids, "Clear");
-                }
-                // a selected gap closes, as in Premiere Pro (#648, #668)
-                if s.state.caption_selection.is_empty()
-                    && let Some(g) = s.state.gap_selection
-                {
-                    return ripple_delete_gap(s, g);
-                }
-                let caps = s.state.caption_selection.clone();
-                return crate::captions::delete(s, &caps, false);
-            }
-            // An Alt selection is already exact; explicit targets keep the command's linked behavior.
-            let sel = if p.get("clips").is_some() || p.get("clip").is_some() { with_links(s, &clips_p(s, p)) } else { s.state.selection.clone() };
-            s.edit_sequence("Clear", |q, _, st| {
-                edit::delete_items(q, &sel);
-                st.selection.clear();
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
-        cmd!("edit.rippleDelete", "Ripple Delete", ["Edit"], Some("Shift+Delete"), r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#, has_clip_or_caption_selection, |s, p| {
-            if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
-                if s.state.caption_selection.is_empty()
-                    && let Some(g) = s.state.gap_selection
-                {
-                    return ripple_delete_gap(s, g);
-                }
-                let caps = s.state.caption_selection.clone();
-                return crate::captions::delete(s, &caps, true);
-            }
-            let sel = if p.get("clips").is_some() || p.get("clip").is_some() { with_links(s, &clips_p(s, p)) } else { s.state.selection.clone() };
-            s.edit_sequence("Ripple Delete", |q, _, st| {
-                let spans = edit::ripple_delete_items(q, &sel)?;
-                if st.ripple_sequence_markers {
-                    for r in spans.iter().rev() {
-                        crate::sequence_tools::ripple_markers(&mut q.markers, r.end(), -r.duration);
+fn target_clips_p(p: &Value, cmd: &str) -> Result<Option<Vec<ClipId>>> {
+    if let Some(c) = p.get("clip") {
+        let id = c.as_u64().ok_or_else(|| bad(cmd, "`clip` must be an integer clip id"))?;
+        return Ok(Some(vec![ClipId(id)]));
+    }
+    if let Some(clips) = p.get("clips") {
+        let arr = clips.as_array().ok_or_else(|| bad(cmd, "`clips` must be an array of clip ids"))?;
+        let mut ids = Vec::with_capacity(arr.len());
+        for v in arr {
+            let id = v.as_u64().ok_or_else(|| bad(cmd, "`clips` elements must be integer clip ids"))?;
+            ids.push(ClipId(id));
+        }
+        return Ok(Some(ids));
+    }
+    Ok(None)
+}
+
+        cmd!(
+            "edit.clear",
+            "Clear",
+            ["Edit"],
+            Some("Backspace"),
+            r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#,
+            has_any_selection,
+            |s, p| {
+                let target = target_clips_p(p, "edit.clear")?;
+                if target.is_none() && s.state.selection.is_empty() {
+                    // a selected transition (clicked in the Timeline) goes, as a clip would
+                    if !s.state.transition_selection.is_empty() {
+                        let ids = s.state.transition_selection.clone();
+                        return remove_transitions(s, &ids, "Clear");
                     }
+                    // a selected gap closes, as in Premiere Pro (#648, #668)
+                    if s.state.caption_selection.is_empty()
+                        && let Some(g) = s.state.gap_selection
+                    {
+                        return ripple_delete_gap(s, g);
+                    }
+                    let caps = s.state.caption_selection.clone();
+                    return crate::captions::delete(s, &caps, false);
                 }
-                st.selection.clear();
-                Ok(())
-            })?;
-            Ok(Value::Null)
-        }),
+                // An Alt selection is already exact; explicit targets keep the command's linked behavior.
+                let sel = match target {
+                    Some(clips) => with_links(s, &clips),
+                    None => s.state.selection.clone(),
+                };
+                s.edit_sequence("Clear", |q, _, st| {
+                    edit::delete_items(q, &sel);
+                    st.selection.clear();
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
+        cmd!(
+            "edit.rippleDelete",
+            "Ripple Delete",
+            ["Edit"],
+            Some("Shift+Delete"),
+            r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#,
+            has_clip_or_caption_selection,
+            |s, p| {
+                let target = target_clips_p(p, "edit.rippleDelete")?;
+                if target.is_none() && s.state.selection.is_empty() {
+                    if s.state.caption_selection.is_empty()
+                        && let Some(g) = s.state.gap_selection
+                    {
+                        return ripple_delete_gap(s, g);
+                    }
+                    let caps = s.state.caption_selection.clone();
+                    return crate::captions::delete(s, &caps, true);
+                }
+                let sel = match target {
+                    Some(clips) => with_links(s, &clips),
+                    None => s.state.selection.clone(),
+                };
+                s.edit_sequence("Ripple Delete", |q, _, st| {
+                    let spans = edit::ripple_delete_items(q, &sel)?;
+                    if st.ripple_sequence_markers {
+                        for r in spans.iter().rev() {
+                            crate::sequence_tools::ripple_markers(&mut q.markers, r.end(), -r.duration);
+                        }
+                    }
+                    st.selection.clear();
+                    Ok(())
+                })?;
+                Ok(Value::Null)
+            }
+        ),
         cmd!("edit.rippleDeleteHead", "Ripple Delete Head Frame", ["Edit"], None, r#"{"clips":[id]?,"clip":id?}"#, has_selection, |s, p| {
             // #1357: remove the head — from each selected clip's in point through the playhead —
             // and ripple the sequence closed. Linked clips ripple as one group (the engine's
@@ -2770,21 +2811,9 @@ fn build() -> Vec<CommandSpec> {
                 None => place_one(s, p),
             }
         ),
-        cmd!(
-            "timeline.delete",
-            "Delete Clips",
-            [],
-            None,
-            r#"{"clips":[id]|"clip":id?,"ripple":bool?}"#,
-            has_seq,
-            |s, p| {
-                if bool_p(p, "ripple").unwrap_or(false) {
-                    s.execute("edit.rippleDelete", p.clone())
-                } else {
-                    s.execute("edit.clear", p.clone())
-                }
-            }
-        ),
+        cmd!("timeline.delete", "Delete Clips", [], None, r#"{"clips":[id]|"clip":id?,"ripple":bool?}"#, has_seq, |s, p| {
+            if bool_p(p, "ripple").unwrap_or(false) { s.execute("edit.rippleDelete", p.clone()) } else { s.execute("edit.clear", p.clone()) }
+        }),
         cmd!("timeline.select", "Select Clips", [], None, r#"{"clips":[id],"transitions":[id]?,"add":bool,"toggle":bool,"linked":bool?}"#, has_seq, |s, p| {
             if let Some(ids) = p.get("transitions") {
                 return select_transitions(s, ids, bool_p(p, "add").unwrap_or(false), bool_p(p, "toggle").unwrap_or(false));

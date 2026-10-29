@@ -357,4 +357,12 @@ fn timeline_delete_alias_deletes_and_ripple_deletes_explicit_clips() {
     s.execute("timeline.delete", json!({"clips": a_and_its_audio, "ripple": true})).unwrap();
     assert!(clip(&s, a.id).is_none());
     assert_eq!(clip(&s, b.id).unwrap().start, a.start, "the next clip closes the gap");
+
+    // Malformed explicit targets are rejected and do not mutate selection
+    s.state.selection = vec![b.id];
+    assert!(s.execute("timeline.delete", json!({"clip": null})).is_err());
+    assert!(s.execute("edit.clear", json!({"clip": "invalid"})).is_err());
+    assert!(s.execute("edit.rippleDelete", json!({"clips": null})).is_err());
+    assert_eq!(s.state.selection, vec![b.id]);
+    assert!(clip(&s, b.id).is_some());
 }
