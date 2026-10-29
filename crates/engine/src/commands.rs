@@ -1741,7 +1741,7 @@ fn build() -> Vec<CommandSpec> {
         }),
         cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{}", has_clipboard, |s, _| paste(s, false)),
         cmd!("edit.pasteInsert", "Paste Insert", ["Edit"], Some("Cmd+Shift+V"), "{}", has_clipboard, |s, _| paste(s, true)),
-        cmd!("edit.clear", "Clear", ["Edit"], Some("Backspace"), r#"{"clips":[id]?}"#, has_any_selection, |s, p| {
+        cmd!("edit.clear", "Clear", ["Edit"], Some("Backspace"), r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#, has_any_selection, |s, p| {
             if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
                 // a selected transition (clicked in the Timeline) goes, as a clip would
                 if !s.state.transition_selection.is_empty() {
@@ -1766,7 +1766,7 @@ fn build() -> Vec<CommandSpec> {
             })?;
             Ok(Value::Null)
         }),
-        cmd!("edit.rippleDelete", "Ripple Delete", ["Edit"], Some("Shift+Delete"), r#"{"clips":[id]?}"#, has_clip_or_caption_selection, |s, p| {
+        cmd!("edit.rippleDelete", "Ripple Delete", ["Edit"], Some("Shift+Delete"), r#"{"clips":[id]?,"clip":id?} (explicit clips work without a selection)"#, has_clip_or_caption_selection, |s, p| {
             if p.get("clips").is_none() && p.get("clip").is_none() && s.state.selection.is_empty() {
                 if s.state.caption_selection.is_empty()
                     && let Some(g) = s.state.gap_selection
@@ -2768,6 +2768,21 @@ fn build() -> Vec<CommandSpec> {
             |s, p| match p.get("items") {
                 Some(items) => place_items(s, p, items),
                 None => place_one(s, p),
+            }
+        ),
+        cmd!(
+            "timeline.delete",
+            "Delete Clips",
+            [],
+            None,
+            r#"{"clips":[id]|"clip":id?,"ripple":bool?}"#,
+            has_seq,
+            |s, p| {
+                if bool_p(p, "ripple").unwrap_or(false) {
+                    s.execute("edit.rippleDelete", p.clone())
+                } else {
+                    s.execute("edit.clear", p.clone())
+                }
             }
         ),
         cmd!("timeline.select", "Select Clips", [], None, r#"{"clips":[id],"transitions":[id]?,"add":bool,"toggle":bool,"linked":bool?}"#, has_seq, |s, p| {

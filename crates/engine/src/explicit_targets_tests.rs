@@ -330,3 +330,31 @@ fn unlink_with_an_unlinked_clip_in_the_selection_still_unlinks() {
         assert_eq!(clip(&s, c).unwrap().link, None, "{c:?}");
     }
 }
+
+/// #3620: timeline.delete aliases clear / ripple delete and accepts explicit clips without selection.
+#[test]
+fn timeline_delete_alias_deletes_and_ripple_deletes_explicit_clips() {
+    let mut s = demo();
+    let (a, b) = (v1(&s)[0].clone(), v1(&s)[1].clone());
+    assert!(s.is_enabled("timeline.delete"), "timeline.delete is enabled whenever a sequence is open");
+
+    // Regular delete by clip id
+    s.execute("timeline.delete", json!({"clip": a.id.0})).unwrap();
+    assert!(clip(&s, a.id).is_none() && clip(&s, b.id).is_some());
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(clip(&s, a.id).is_some());
+
+    // Ripple delete by clips list
+    let a_and_its_audio: Vec<u64> = s
+        .active_sequence()
+        .unwrap()
+        .all_tracks()
+        .flat_map(|t| &t.items)
+        .filter(|i| i.id == a.id || (i.link.is_some() && i.link == a.link))
+        .map(|i| i.id.0)
+        .collect();
+    s.execute("timeline.setTrack", json!({"track": "A2", "syncLock": false})).unwrap();
+    s.execute("timeline.delete", json!({"clips": a_and_its_audio, "ripple": true})).unwrap();
+    assert!(clip(&s, a.id).is_none());
+    assert_eq!(clip(&s, b.id).unwrap().start, a.start, "the next clip closes the gap");
+}
